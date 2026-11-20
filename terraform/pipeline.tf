@@ -1,11 +1,23 @@
 # ---------------------------------------------------------------------------
-# 1) GitHub connection
-#    Created in PENDING state. Finish it in the console:
-#    Developer Tools -> Settings -> Connections -> "Update pending connection"
+# 1) GitHub connection - NOT managed by Terraform, only READ (data source)
+#    A new connection is always born PENDING and needs a manual approval in the
+#    console. By keeping it outside Terraform, it survives "terraform destroy"
+#    and stays AVAILABLE, so a full destroy + apply needs no manual step.
+#    To use another connection (e.g. Connection_clase8), change
+#    var.github_connection_name.
 # ---------------------------------------------------------------------------
-resource "aws_codestarconnections_connection" "github" {
-  name          = "${var.project_name}-github"
-  provider_type = "GitHub"
+data "aws_codestarconnections_connection" "github" {
+  name = var.github_connection_name
+}
+
+# One-time: Terraform used to manage this connection. This block removes it
+# from the state WITHOUT deleting it in AWS (it keeps working).
+removed {
+  from = aws_codestarconnections_connection.github
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -195,7 +207,7 @@ resource "aws_iam_role_policy" "codepipeline" {
         Sid      = "GitHubConnection"
         Effect   = "Allow"
         Action   = ["codestar-connections:UseConnection", "codeconnections:UseConnection"]
-        Resource = aws_codestarconnections_connection.github.arn
+        Resource = data.aws_codestarconnections_connection.github.arn
       },
       {
         Sid      = "CodeBuild"
@@ -255,7 +267,7 @@ resource "aws_codepipeline" "pipeline" {
       output_artifacts = ["source_output"]
 
       configuration = {
-        ConnectionArn    = aws_codestarconnections_connection.github.arn
+        ConnectionArn    = data.aws_codestarconnections_connection.github.arn
         FullRepositoryId = var.github_repo
         BranchName       = var.github_branch
       }

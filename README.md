@@ -106,7 +106,7 @@ from the references between resources: if B uses `A.id`, A is created first.
 | 1.3 | `network.tf` | `aws_subnet.public_a/b`, `private_a/b` | 1.1 |
 | 1.4 | `network.tf` | `aws_route_table.public` (0.0.0.0/0 → IGW), `private` | 1.2 |
 | 1.5 | `network.tf` | `aws_route_table_association.*` | 1.3, 1.4 |
-| 2.1 | `pipeline.tf` | `aws_codestarconnections_connection.github` | - |
+| 2.1 | `pipeline.tf` | `data.aws_codestarconnections_connection.github` (only read, created outside Terraform) | - |
 | 2.2 | `pipeline.tf` | `aws_ecr_repository.app` | - |
 | 2.3 | `pipeline.tf` | `aws_s3_bucket.artifacts` | - |
 | 2.4 | `pipeline.tf` | `aws_iam_role.codebuild` + policy | 2.2, 2.3 |
@@ -159,10 +159,15 @@ public subnets.
 
 ### 4.3 Pipeline - `pipeline.tf`
 ```hcl
-resource "aws_codestarconnections_connection" "github" {
-  provider_type = "GitHub"                 # born PENDING -> approve it once in the console
+data "aws_codestarconnections_connection" "github" {
+  name = var.github_connection_name        # "terraform-final-github" (already AVAILABLE)
 }
 ```
+The GitHub connection is **read**, not created, by Terraform. A new connection is always
+born `PENDING` and must be approved by hand in the console, so it is kept **outside**
+Terraform: it survives `terraform destroy` and a rebuild needs no manual step. (A one-time
+`removed { lifecycle { destroy = false } }` block took it out of the state without deleting
+it.) To use another connection, e.g. `Connection_clase8`, change `github_connection_name`.
 ```hcl
 environment {
   privileged_mode = true                   # lets CodeBuild run "docker build"
@@ -304,9 +309,10 @@ terraform apply
 terraform output app_url # open it in the browser
 ```
 
-**One-time manual step:** after the first apply the GitHub connection is `PENDING`.
-AWS Console → CodePipeline → Settings → Connections → `terraform-final-github` →
-**Update pending connection** (give the GitHub App access only to `terraform_final`).
+**Prerequisite (once per AWS account):** an **AVAILABLE** GitHub connection named
+`terraform-final-github` (variable `github_connection_name`). It already exists. If you
+ever need a new one: AWS Console → CodePipeline → Settings → Connections → Create
+connection (GitHub) → give the GitHub App access only to `terraform_final`.
 
 **Which command for which change:**
 
@@ -343,5 +349,33 @@ aws elbv2 describe-target-health \
 - Free tier: `t3.small`, CodeBuild `BUILD_GENERAL1_SMALL` (100 min/month), small ECR/S3 usage.
 - **Not free:** ALB (~$0.0225/hour) and the public IPv4 addresses, unless free-tier credits
   cover them.
-- When you finish: `cd terraform && terraform destroy`. The state bucket
-  `terraform-final-state` is not managed by Terraform and is kept.
+- When you finish: `cd terraform && terraform destroy`. Kept (not managed by Terraform):
+  the state bucket `terraform-final-state` and the GitHub connection.
+
+---
+
+## 8. Destroy and rebuild from zero
+
+```bash
+cd terraform
+terraform plan -destroy   # preview (safe)
+terraform destroy
+terraform apply
+```
+- The pipeline **runs by itself** right after it is created (the GitHub connection is
+  still AVAILABLE): Source ✔ Build ✔ (pushes the image to the new, empty ECR) → it stops at
+  **Approval** → click **Review → Approve** → Deploy ✔.
+- Until that first Build finishes, ECR is empty: the tasks can't pull the image, the target
+  group has no healthy targets and the ALB answers **503**. ECS keeps retrying, so it fixes
+  itself as soon as the image exists.
+
+**What changes**
+
+- `app_url`: the new ALB gets a new DNS name. Run `terraform output app_url` again.
+- Instance ID and IPs: these are new too.
+- Task definition revisions: the ones the pipeline created (`terraform-final-task:2`,
+  `:3`…) aren't in Terraform's state, so they stay in AWS as old entries. They're harmless.
+
+**Normal diff after a pipeline run:** `terraform plan` shows `aws_ecs_service.app` →
+`task_definition :N -> :M`. The pipeline registered a newer revision with the same content
+(`:latest` image); applying it only does a rolling restart of the same image.

@@ -20,6 +20,7 @@ design decision in this project, so you can study where each line comes from.
 | Files and folders: Terraform loads **all** `.tf` files in a folder as one configuration | Splitting into `network.tf`, `pipeline.tf`, `alb.tf`, `ecs.tf`... | https://developer.hashicorp.com/terraform/language/files |
 | Resource dependencies: creation order comes from **references**, not from file order | Why the cluster and service exist before the pipeline's Deploy stage | https://developer.hashicorp.com/terraform/language/resources/behavior#resource-dependencies |
 | `depends_on` | Pipeline waits for its IAM policy; service waits for the listener | https://developer.hashicorp.com/terraform/language/meta-arguments/depends_on |
+| `removed` block (stop managing a resource without destroying it) | Taking the GitHub connection out of the state | https://developer.hashicorp.com/terraform/language/block/removed |
 | `lifecycle { ignore_changes }` | Service ignores `desired_count` (auto scaling owns it) | https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle |
 | S3 backend (`use_lockfile`, `encrypt`) | `versions.tf`: state in `terraform-final-state` | https://developer.hashicorp.com/terraform/language/backend/s3 |
 | Input variables | `variables.tf` | https://developer.hashicorp.com/terraform/language/values/variables |
@@ -50,6 +51,7 @@ Base URL: `https://registry.terraform.io/providers/hashicorp/aws/latest/docs`
 | Resource | Docs |
 |---|---|
 | 📖 `aws_codestarconnections_connection` (created **PENDING**, finish in the console) | https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/codestarconnections_connection |
+| `aws_codestarconnections_connection` (data source: read an existing connection by name) | https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/codestarconnections_connection |
 | `aws_ecr_repository` (`force_delete`, `scan_on_push`) | https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecr_repository |
 | 📖 `aws_s3_bucket` (`force_destroy`) | https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket |
 | `aws_s3_bucket_public_access_block` | https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_public_access_block |

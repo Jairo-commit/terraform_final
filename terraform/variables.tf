@@ -16,6 +16,12 @@ variable "github_repo" {
   default     = "Jairo-commit/terraform_final"
 }
 
+variable "github_connection_name" {
+  description = "Existing, AVAILABLE GitHub connection (not managed by Terraform)"
+  type        = string
+  default     = "terraform-final-github"
+}
+
 variable "github_branch" {
   description = "Branch that triggers the pipeline"
   type        = string

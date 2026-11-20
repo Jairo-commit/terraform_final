@@ -32,6 +32,7 @@ The app is delivered by an AWS CodePipeline that reads this GitHub repo.
    Tasks are small: 0.1 vCPU (102 units) / 0.125 GB (128 MiB). Everything in public subnets.
 
 ## Manual steps (cannot be done by Terraform)
-- After the first apply, the GitHub connection `terraform-final-github` is PENDING:
-  Console -> Developer Tools -> Settings -> Connections -> Update pending connection
-  (give the GitHub App access only to `terraform_final`). Then "Release change" on the pipeline.
+- The GitHub connection `terraform-final-github` is NOT managed by Terraform (read with a
+  data source, var `github_connection_name`) so it survives destroy and stays AVAILABLE.
+  Only if it is ever deleted: create it in Console -> CodePipeline -> Settings -> Connections.
+- After a destroy + apply: approve the first pipeline run (Approval stage) so ECR gets an image.

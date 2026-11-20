@@ -26,8 +26,8 @@ output "artifacts_bucket" {
 }
 
 output "github_connection_status" {
-  description = "PENDING until you approve it in the console"
-  value       = aws_codestarconnections_connection.github.connection_status
+  description = "Must be AVAILABLE for the pipeline Source stage to work"
+  value       = data.aws_codestarconnections_connection.github.connection_status
 }
 
 output "ecs_cluster_name" {

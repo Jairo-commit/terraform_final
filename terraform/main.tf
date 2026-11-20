@@ -21,7 +21,8 @@
 #     1.5 aws_route_table_association.*     subnet <-> route table    (needs 1.3, 1.4)
 #
 #  2) pipeline.tf  - THE CI/CD PIPELINE (Release change -> new image in ECR)
-#     2.1 aws_codestarconnections_connection.github  GitHub access (approve in console)
+#     2.1 data.aws_codestarconnections_connection.github  GitHub access, only READ
+#         (created/approved once, outside Terraform -> survives destroy)
 #     2.2 aws_ecr_repository.app            where the Docker image is stored
 #     2.3 aws_s3_bucket.artifacts           files passed between pipeline stages
 #     2.4 aws_iam_role.codebuild (+policy)  permissions: logs, S3, push to ECR (needs 2.2, 2.3)
