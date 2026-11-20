@@ -1,0 +1,5 @@
+# Terraform local files (state lives in S3: terraform-final-state)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
