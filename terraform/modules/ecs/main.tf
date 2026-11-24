@@ -52,14 +52,14 @@ resource "aws_iam_instance_profile" "ecs_instance" {
 resource "aws_security_group" "ecs_instance" {
   name        = "${var.project_name}-ecs-instance-sg"
   description = "HTTP to the ECS instance" # changing it would force a replacement
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = var.vpc_id
 
   ingress {
     description     = "Dynamic container ports, only from the ALB"
     from_port       = 32768
     to_port         = 65535
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    security_groups = [var.alb_security_group_id]
   }
 
   egress {
@@ -79,7 +79,7 @@ resource "aws_security_group" "ecs_instance" {
 resource "aws_instance" "ecs" {
   ami                    = data.aws_ssm_parameter.ecs_ami.insecure_value
   instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public_a.id
+  subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.ecs_instance.id]
   iam_instance_profile   = aws_iam_instance_profile.ecs_instance.name
 
@@ -105,7 +105,7 @@ resource "aws_ecs_task_definition" "app" {
 
   container_definitions = jsonencode([{
     name      = var.container_name
-    image     = "${aws_ecr_repository.app.repository_url}:latest"
+    image     = "${var.ecr_repository_url}:latest"
     cpu       = 102
     memory    = 128
     essential = true
@@ -127,7 +127,7 @@ resource "aws_ecs_service" "app" {
 
   # Each task is registered automatically as a target (instance + dynamic port)
   load_balancer {
-    target_group_arn = aws_lb_target_group.app.arn
+    target_group_arn = var.target_group_arn
     container_name   = var.container_name
     container_port   = 80
   }
@@ -145,8 +145,10 @@ resource "aws_ecs_service" "app" {
     ignore_changes = [desired_count]
   }
 
-  # The listener must exist before the service registers targets
-  depends_on = [aws_lb_listener.http]
+  # The listener must exist before the service registers targets.
+  # The listener lives in another module, so we can't write aws_lb_listener.http
+  # here: we wait for the input variable that carries its ARN instead.
+  depends_on = [var.listener_arn]
 }
 
 # 8) Service Auto Scaling: min 2, max 4 tasks

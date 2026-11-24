@@ -1,60 +1,72 @@
 # =============================================================================
-#  terraform_final - MAIN (read this file first)
+#  terraform_final - MAIN (branch: modules-experiment)
 # =============================================================================
-#  Terraform reads ALL .tf files in this folder as if they were one file.
-#  File names are only for humans. The creation order is NOT the order of the
-#  files/lines: Terraform builds it from the references between resources
-#  (e.g. a subnet uses aws_vpc.main.id -> the VPC is created first).
+#  Terraform only reads the .tf files of THIS folder (the root module).
+#  The folders in modules/ are ignored UNTIL a "module" block below loads them
+#  with "source". After adding/changing a module block -> run "terraform init".
 #
-#  Step by step, this is how the infrastructure is built:
+#  Each module is a closed box:
+#    - IN : it only sees the arguments passed here (its variables.tf)
+#    - OUT: the root only sees what it exports (its outputs.tf),
+#           read as module.<name>.<output>
 #
-#  0) versions.tf  - AWS provider + remote state in S3 (terraform-final-state)
-#     variables.tf - names and settings used everywhere (region, project_name...)
+#  The order of the blocks below does NOT matter either: Terraform still builds
+#  ONE graph with all the resources of all the modules. Wiring outputs into
+#  inputs is what creates the dependencies:
 #
-#  1) network.tf   - THE NETWORK
-#     1.1 aws_vpc.main                      10.0.0.0/16
-#     1.2 aws_internet_gateway.main         door to the internet      (needs 1.1)
-#     1.3 aws_subnet.public_a / public_b    10.0.1.0/24, 10.0.2.0/24  (needs 1.1)
-#         aws_subnet.private_a / private_b  10.0.11.0/24, 10.0.12.0/24
-#     1.4 aws_route_table.public            0.0.0.0/0 -> IGW          (needs 1.2)
-#         aws_route_table.private           only local VPC traffic
-#     1.5 aws_route_table_association.*     subnet <-> route table    (needs 1.3, 1.4)
+#    network --vpc/subnets--> alb --sg/target group/listener--> ecs
+#    pipeline --ecr url--> ecs --cluster/service names--> pipeline
 #
-#  2) pipeline.tf  - THE CI/CD PIPELINE (Release change -> new image in ECR)
-#     2.1 data.aws_codestarconnections_connection.github  GitHub access, only READ
-#         (created/approved once, outside Terraform -> survives destroy)
-#     2.2 aws_ecr_repository.app            where the Docker image is stored
-#     2.3 aws_s3_bucket.artifacts           files passed between pipeline stages
-#     2.4 aws_iam_role.codebuild (+policy)  permissions: logs, S3, push to ECR (needs 2.2, 2.3)
-#     2.5 aws_codebuild_project.build       docker build + push :latest   (needs 2.4)
-#     2.6 aws_iam_role.codepipeline (+policy) permissions: S3, GitHub, CodeBuild (needs 2.1, 2.5)
-#     2.7 aws_codepipeline.pipeline         Source (GitHub) -> Build (CodeBuild)
-#         -> Approval (manual, stops here) -> Deploy (ECS)
-#                                           (needs all above AND 4.1 + 4.7:
-#                                            cluster and service exist first)
-#
-#  3) alb.tf       - THE LOAD BALANCER (the only public entry point)
-#     3.1 aws_security_group.alb            port 80 open to the internet (needs 1.1)
-#     3.2 aws_lb.main                       public ALB in public_a + public_b (needs 1.3, 3.1)
-#     3.3 aws_lb_target_group.app           type instance, health check GET / -> 200
-#     3.4 aws_lb_listener.http              ALB :80 -> target group     (needs 3.2, 3.3)
-#
-#  4) ecs.tf       - THE CONTAINERS (where the web page runs)
-#     4.1 aws_ecs_cluster.main              the cluster
-#     4.2 data.aws_ssm_parameter.ecs_ami    official ECS-optimized AMI (no snapshot)
-#     4.3 aws_iam_role.ecs_instance         join the cluster, pull from ECR, SSM
-#         (+2 policy attachments, + instance profile)
-#     4.4 aws_security_group.ecs_instance   ports 32768-65535 ONLY from the ALB (needs 3.1)
-#     4.5 aws_instance.ecs                  t3.small in public_a, joins 4.1
-#                                           (needs 1.3, 4.1, 4.2, 4.3, 4.4)
-#     4.6 aws_ecs_task_definition.app       "Main", ECR :latest, 0.1 vCPU / 128 MiB,
-#                                           dynamic host port            (needs 2.2)
-#     4.7 aws_ecs_service.app               2 tasks, registered in the target group
-#                                           (needs 4.1, 4.6, 3.3, 3.4)
-#     4.8 aws_appautoscaling_target/policy  min 2 / max 4 tasks, CPU 50% (needs 4.7)
-#
-#  outputs.tf      - values printed after "terraform apply" (IDs, URLs)
+#  The last line looks like a loop between modules, but it isn't one between
+#  RESOURCES: ECR -> task definition -> service -> CodePipeline. Modules are
+#  not created as a block; each resource waits only for what it uses.
 # =============================================================================
 
-# Shared data: current AWS account id (used to build unique names, e.g. the bucket)
-data "aws_caller_identity" "current" {}
+# 1) THE NETWORK - VPC, 2 public + 2 private subnets, IGW, route tables
+module "network" {
+  source = "./modules/network"
+
+  project_name = var.project_name
+  aws_region   = var.aws_region
+}
+
+# 2) THE LOAD BALANCER - the only public entry point
+module "alb" {
+  source = "./modules/alb"
+
+  project_name      = var.project_name
+  vpc_id            = module.network.vpc_id
+  public_subnet_ids = module.network.public_subnet_ids
+}
+
+# 3) THE CONTAINERS - cluster, EC2 instance, task, service, auto scaling
+module "ecs" {
+  source = "./modules/ecs"
+
+  project_name   = var.project_name
+  instance_type  = var.instance_type
+  container_name = var.container_name
+
+  vpc_id    = module.network.vpc_id
+  subnet_id = module.network.public_subnet_ids[0] # public_a
+
+  alb_security_group_id = module.alb.security_group_id
+  target_group_arn      = module.alb.target_group_arn
+  listener_arn          = module.alb.listener_arn
+
+  ecr_repository_url = module.pipeline.ecr_repository_url
+}
+
+# 4) THE CI/CD PIPELINE - ECR, artifacts bucket, CodeBuild, CodePipeline
+module "pipeline" {
+  source = "./modules/pipeline"
+
+  project_name           = var.project_name
+  github_repo            = var.github_repo
+  github_connection_name = var.github_connection_name
+  github_branch          = var.github_branch
+  container_name         = var.container_name
+
+  ecs_cluster_name = module.ecs.cluster_name
+  ecs_service_name = module.ecs.service_name
+}

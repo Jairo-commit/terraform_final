@@ -6,7 +6,7 @@
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "HTTP from the internet to the ALB"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = var.vpc_id
 
   ingress {
     description = "HTTP"
@@ -34,7 +34,7 @@ resource "aws_lb" "main" {
   load_balancer_type = "application"
   internal           = false
   security_groups    = [aws_security_group.alb.id]
-  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
+  subnets            = var.public_subnet_ids
 }
 
 # 3) Target group: where the ALB sends traffic. ECS registers each task here
@@ -44,7 +44,7 @@ resource "aws_lb_target_group" "app" {
   port        = 80
   protocol    = "HTTP"
   target_type = "instance"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = var.vpc_id
 
   # Wait only 30s for old tasks to finish their requests (default is 300s)
   deregistration_delay = 30

@@ -10,15 +10,8 @@ data "aws_codestarconnections_connection" "github" {
   name = var.github_connection_name
 }
 
-# One-time: Terraform used to manage this connection. This block removes it
-# from the state WITHOUT deleting it in AWS (it keeps working).
-removed {
-  from = aws_codestarconnections_connection.github
-
-  lifecycle {
-    destroy = false
-  }
-}
+# Current AWS account id (used to build a unique bucket name)
+data "aws_caller_identity" "current" {}
 
 # ---------------------------------------------------------------------------
 # 2) ECR repository where the Docker image (Dockerfile + index.html) is pushed
@@ -311,7 +304,8 @@ resource "aws_codepipeline" "pipeline" {
     }
   }
 
-  # Uses the cluster and service names -> Terraform creates them BEFORE this stage
+  # Uses the cluster and service names (outputs of module.ecs, passed in as
+  # variables) -> Terraform still creates them BEFORE the pipeline
   stage {
     name = "Deploy"
 
@@ -324,8 +318,8 @@ resource "aws_codepipeline" "pipeline" {
       input_artifacts = ["build_output"]
 
       configuration = {
-        ClusterName = aws_ecs_cluster.main.name
-        ServiceName = aws_ecs_service.app.name
+        ClusterName = var.ecs_cluster_name
+        ServiceName = var.ecs_service_name
         FileName    = "imagedefinitions.json"
       }
     }
